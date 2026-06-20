@@ -2,8 +2,8 @@ name: Twitter Monitor (Playwright)
 
 on:
   schedule:
-    # 15分ごとに実行 (UTC)
-    - cron: "*/15 * * * *"
+    # 毎日9時（日本時間）= 0:00 UTC に実行
+    - cron: "0 0 * * *"
   workflow_dispatch:
 
 jobs:
