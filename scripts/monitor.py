@@ -1,90 +1,120 @@
 #!/usr/bin/env python3
 """
-Twitter/X post monitor: checks a specific user's recent tweets for keywords
-and sends a Gmail notification when a match is found.
+Twitter/X monitor using Playwright (no API key required).
+Opens x.com/<TARGET_USERNAME> in a headless browser, finds new tweets
+containing any of the configured KEYWORDS, and sends a Gmail alert.
 
 Required environment variables:
-  TWITTER_BEARER_TOKEN  - Twitter API v2 Bearer Token
-  TARGET_USERNAME       - Twitter username to monitor (without @)
-  KEYWORDS              - Comma-separated keywords to watch for
-  GMAIL_ADDRESS         - Gmail address used to send (must have App Password enabled)
-  GMAIL_APP_PASSWORD    - Gmail App Password (not your regular password)
-  TO_EMAIL              - Recipient email address (optional, defaults to GMAIL_ADDRESS)
-  LAST_TWEET_ID_FILE    - Path to file storing the last seen tweet ID (default: .last_tweet_id)
+  TARGET_USERNAME     - Twitter/X username to monitor (without @)
+  KEYWORDS            - Comma-separated keywords to watch for
+  GMAIL_ADDRESS       - Gmail address used to send (must have App Password enabled)
+  GMAIL_APP_PASSWORD  - Gmail App Password
+  TO_EMAIL            - Recipient address (optional, defaults to GMAIL_ADDRESS)
+
+Optional (for login — needed if X.com blocks anonymous access):
+  X_USERNAME          - Your X account username or email
+  X_PASSWORD          - Your X account password
 """
 
 import os
 import sys
 import json
 import smtplib
-import requests
+from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from pathlib import Path
+from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-BEARER_TOKEN = os.environ["TWITTER_BEARER_TOKEN"]
 TARGET_USERNAME = os.environ["TARGET_USERNAME"]
 KEYWORDS = [k.strip().lower() for k in os.environ["KEYWORDS"].split(",") if k.strip()]
 GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 TO_EMAIL = os.environ.get("TO_EMAIL", GMAIL_ADDRESS)
-LAST_TWEET_ID_FILE = Path(os.environ.get("LAST_TWEET_ID_FILE", ".last_tweet_id"))
+X_USERNAME = os.environ.get("X_USERNAME", "")
+X_PASSWORD = os.environ.get("X_PASSWORD", "")
 
-HEADERS = {"Authorization": f"Bearer {BEARER_TOKEN}"}
-API_BASE = "https://api.twitter.com/2"
-
-
-def get_user_id(username: str) -> str:
-    url = f"{API_BASE}/users/by/username/{username}"
-    r = requests.get(url, headers=HEADERS, timeout=10)
-    r.raise_for_status()
-    data = r.json()
-    if "errors" in data:
-        print(f"Error fetching user ID: {data['errors']}", file=sys.stderr)
-        sys.exit(1)
-    return data["data"]["id"]
+SEEN_IDS_FILE = Path(os.environ.get("SEEN_IDS_FILE", ".seen_tweet_ids.json"))
+PROFILE_URL = f"https://x.com/{TARGET_USERNAME}"
 
 
-def fetch_recent_tweets(user_id: str, since_id: str | None) -> list[dict]:
-    url = f"{API_BASE}/users/{user_id}/tweets"
-    params = {
-        "max_results": 10,
-        "tweet.fields": "created_at,text",
-        "exclude": "retweets,replies",
-    }
-    if since_id:
-        params["since_id"] = since_id
+def load_seen_ids() -> set[str]:
+    if SEEN_IDS_FILE.exists():
+        return set(json.loads(SEEN_IDS_FILE.read_text()))
+    return set()
 
-    r = requests.get(url, headers=HEADERS, params=params, timeout=10)
-    r.raise_for_status()
-    data = r.json()
 
-    if data.get("meta", {}).get("result_count", 0) == 0:
+def save_seen_ids(ids: set[str]) -> None:
+    # Keep only the latest 500 IDs to avoid unbounded growth
+    SEEN_IDS_FILE.write_text(json.dumps(list(ids)[-500:]))
+
+
+def login(page) -> None:
+    print("Logging in to X.com...")
+    page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded")
+
+    # Enter username/email
+    page.wait_for_selector('input[autocomplete="username"]', timeout=15000)
+    page.fill('input[autocomplete="username"]', X_USERNAME)
+    page.keyboard.press("Enter")
+
+    # Enter password
+    page.wait_for_selector('input[name="password"]', timeout=10000)
+    page.fill('input[name="password"]', X_PASSWORD)
+    page.keyboard.press("Enter")
+
+    # Wait for redirect to home
+    page.wait_for_url("https://x.com/home", timeout=15000)
+    print("Login successful.")
+
+
+def scrape_tweets(page) -> list[dict]:
+    """Return list of {id, text} dicts from the profile timeline."""
+    page.goto(PROFILE_URL, wait_until="domcontentloaded")
+
+    try:
+        page.wait_for_selector('article[data-testid="tweet"]', timeout=20000)
+    except PWTimeout:
+        print("No tweets found on page (possible login wall or empty timeline).")
         return []
-    return data.get("data", [])
+
+    articles = page.query_selector_all('article[data-testid="tweet"]')
+    tweets = []
+    for article in articles:
+        text_el = article.query_selector('[data-testid="tweetText"]')
+        if not text_el:
+            continue
+
+        # Grab tweet ID from the permalink inside the article
+        link_el = article.query_selector('a[href*="/status/"]')
+        tweet_id = None
+        if link_el:
+            href = link_el.get_attribute("href") or ""
+            parts = href.split("/status/")
+            if len(parts) > 1:
+                tweet_id = parts[1].split("/")[0].split("?")[0]
+
+        if tweet_id:
+            tweets.append({"id": tweet_id, "text": text_el.inner_text()})
+
+    return tweets
 
 
-def tweet_matches(tweet_text: str) -> bool:
-    text_lower = tweet_text.lower()
-    return any(kw in text_lower for kw in KEYWORDS)
+def tweet_matches(text: str) -> bool:
+    return any(kw in text.lower() for kw in KEYWORDS)
 
 
-def send_email(tweet: dict, username: str) -> None:
-    tweet_id = tweet["id"]
-    tweet_text = tweet["text"]
-    tweet_url = f"https://x.com/{username}/status/{tweet_id}"
-
-    subject = f"[Twitter Alert] @{username} がキーワードを含む投稿をしました"
+def send_email(tweet: dict) -> None:
+    tweet_url = f"https://x.com/{TARGET_USERNAME}/status/{tweet['id']}"
+    subject = f"[X Monitor] @{TARGET_USERNAME} がキーワードを含む投稿をしました"
     body = f"""\
-@{username} がキーワードを含む投稿を検知しました。
+@{TARGET_USERNAME} がキーワード({', '.join(KEYWORDS)})を含む投稿を検知しました。
 
 --- 投稿内容 ---
-{tweet_text}
+{tweet['text']}
 
 --- リンク ---
 {tweet_url}
 """
-
     msg = MIMEMultipart()
     msg["From"] = GMAIL_ADDRESS
     msg["To"] = TO_EMAIL
@@ -95,43 +125,49 @@ def send_email(tweet: dict, username: str) -> None:
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_ADDRESS, TO_EMAIL, msg.as_string())
 
-    print(f"Email sent for tweet {tweet_id}")
-
-
-def load_last_id() -> str | None:
-    if LAST_TWEET_ID_FILE.exists():
-        content = LAST_TWEET_ID_FILE.read_text().strip()
-        return content if content else None
-    return None
-
-
-def save_last_id(tweet_id: str) -> None:
-    LAST_TWEET_ID_FILE.write_text(tweet_id)
+    print(f"Email sent for tweet {tweet['id']}")
 
 
 def main() -> None:
-    print(f"Monitoring @{TARGET_USERNAME} for keywords: {KEYWORDS}")
+    print(f"Monitoring @{TARGET_USERNAME} for: {KEYWORDS}")
+    seen_ids = load_seen_ids()
 
-    user_id = get_user_id(TARGET_USERNAME)
-    last_id = load_last_id()
-    print(f"Last seen tweet ID: {last_id or '(none)'}")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="ja-JP",
+        )
+        page = context.new_page()
 
-    tweets = fetch_recent_tweets(user_id, last_id)
+        if X_USERNAME and X_PASSWORD:
+            login(page)
+
+        tweets = scrape_tweets(page)
+        browser.close()
+
     if not tweets:
-        print("No new tweets found.")
+        print("No tweets retrieved.")
         return
 
-    # API returns newest first — save the newest ID before filtering
-    newest_id = tweets[0]["id"]
+    new_ids = set()
+    matched = 0
+    for tweet in tweets:
+        tid = tweet["id"]
+        new_ids.add(tid)
+        if tid in seen_ids:
+            continue
+        if tweet_matches(tweet["text"]):
+            print(f"Match: {tweet['text'][:80]}...")
+            send_email(tweet)
+            matched += 1
 
-    matched = [t for t in tweets if tweet_matches(t["text"])]
-    print(f"Found {len(tweets)} new tweet(s), {len(matched)} match(es).")
-
-    for tweet in matched:
-        print(f"Match: {tweet['text'][:80]}...")
-        send_email(tweet, TARGET_USERNAME)
-
-    save_last_id(newest_id)
+    print(f"Checked {len(tweets)} tweet(s), sent {matched} notification(s).")
+    save_seen_ids(seen_ids | new_ids)
 
 
 if __name__ == "__main__":

@@ -1,48 +1,53 @@
-name: Twitter Monitor
+name: Twitter Monitor (Playwright)
 
 on:
   schedule:
     # 15分ごとに実行 (UTC)
     - cron: "*/15 * * * *"
-  workflow_dispatch: # 手動実行も可能
+  workflow_dispatch:
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # .last_tweet_id をコミットするために必要
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: main # 常に最新の状態のstateファイルを使う
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install requests
+      - name: Install Python dependencies
+        run: pip install playwright
+
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
 
       - name: Run monitor
         env:
-          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
-          TARGET_USERNAME: ${{ secrets.TARGET_USERNAME }}
+          TARGET_USERNAME: daikei_org
           KEYWORDS: ${{ secrets.KEYWORDS }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
-          LAST_TWEET_ID_FILE: .last_tweet_id
+          # ログインが必要な場合は以下のSecretsも設定してください
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          X_PASSWORD: ${{ secrets.X_PASSWORD }}
+          SEEN_IDS_FILE: .seen_tweet_ids.json
         run: python scripts/monitor.py
 
-      - name: Save last tweet ID
+      - name: Save seen tweet IDs
         run: |
-          if [ -f .last_tweet_id ]; then
+          if [ -f .seen_tweet_ids.json ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add .last_tweet_id
-            git diff --cached --quiet || git commit -m "chore: update last tweet ID [skip ci]"
+            git add .seen_tweet_ids.json
+            git diff --cached --quiet || git commit -m "chore: update seen tweet IDs [skip ci]"
             git push origin main
           fi
