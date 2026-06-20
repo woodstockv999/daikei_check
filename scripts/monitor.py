@@ -56,7 +56,7 @@ def save_screenshot(page, name: str) -> None:
 
 def login(page) -> None:
     print("Logging in to X.com...")
-    page.goto("https://x.com/i/flow/login", wait_until="networkidle", timeout=30000)
+    page.goto("https://x.com/i/flow/login", wait_until="load", timeout=30000)
     page.wait_for_timeout(2000)
     save_screenshot(page, "01_login_page")
 
@@ -115,7 +115,7 @@ def login(page) -> None:
 
 def scrape_tweets(page) -> list[dict]:
     """Return list of {id, text} dicts from the profile timeline."""
-    page.goto(PROFILE_URL, wait_until="domcontentloaded")
+    page.goto(PROFILE_URL, wait_until="load", timeout=30000)
 
     try:
         page.wait_for_selector('article[data-testid="tweet"]', timeout=20000)
