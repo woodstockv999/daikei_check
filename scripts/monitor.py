@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+Twitter/X monitor using Playwright (no API key required).
+Opens x.com/<TARGET_USERNAME> in a headless browser, finds new tweets
+containing any of the configured KEYWORDS, and sends a Gmail alert.
+
+Required environment variables:
+  TARGET_USERNAME     - Twitter/X username to monitor (without @)
+  KEYWORDS            - Comma-separated keywords to watch for
+  GMAIL_ADDRESS       - Gmail address used to send (must have App Password enabled)
+  GMAIL_APP_PASSWORD  - Gmail App Password
+  TO_EMAIL            - Recipient address (optional, defaults to GMAIL_ADDRESS)
+
+Optional (for login — needed if X.com blocks anonymous access):
+  X_USERNAME          - Your X account username or email
+  X_PASSWORD          - Your X account password
+"""
+
+import os
+import sys
+import json
+import smtplib
+from pathlib import Path
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+
+TARGET_USERNAME = os.environ["TARGET_USERNAME"]
+KEYWORDS = [k.strip().lower() for k in os.environ["KEYWORDS"].split(",") if k.strip()]
+GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
+GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
+TO_EMAIL = os.environ.get("TO_EMAIL", GMAIL_ADDRESS)
+X_USERNAME = os.environ.get("X_USERNAME", "")
+X_PASSWORD = os.environ.get("X_PASSWORD", "")
+
+SEEN_IDS_FILE = Path(os.environ.get("SEEN_IDS_FILE", ".seen_tweet_ids.json"))
+PROFILE_URL = f"https://x.com/{TARGET_USERNAME}"
+
+
+def load_seen_ids() -> set[str]:
+    if SEEN_IDS_FILE.exists():
+        return set(json.loads(SEEN_IDS_FILE.read_text()))
+    return set()
+
+
+def save_seen_ids(ids: set[str]) -> None:
+    # Keep only the latest 500 IDs to avoid unbounded growth
+    SEEN_IDS_FILE.write_text(json.dumps(list(ids)[-500:]))
+
+
+def login(page) -> None:
+    print("Logging in to X.com...")
+    page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded")
+
+    # Enter username/email
+    page.wait_for_selector('input[autocomplete="username"]', timeout=15000)
+    page.fill('input[autocomplete="username"]', X_USERNAME)
+    page.keyboard.press("Enter")
+
+    # Enter password
+    page.wait_for_selector('input[name="password"]', timeout=10000)
+    page.fill('input[name="password"]', X_PASSWORD)
+    page.keyboard.press("Enter")
+
+    # Wait for redirect to home
+    page.wait_for_url("https://x.com/home", timeout=15000)
+    print("Login successful.")
+
+
+def scrape_tweets(page) -> list[dict]:
+    """Return list of {id, text} dicts from the profile timeline."""
+    page.goto(PROFILE_URL, wait_until="domcontentloaded")
+
+    try:
+        page.wait_for_selector('article[data-testid="tweet"]', timeout=20000)
+    except PWTimeout:
+        print("No tweets found on page (possible login wall or empty timeline).")
+        return []
+
+    articles = page.query_selector_all('article[data-testid="tweet"]')
+    tweets = []
+    for article in articles:
+        text_el = article.query_selector('[data-testid="tweetText"]')
+        if not text_el:
+            continue
+
+        # Grab tweet ID from the permalink inside the article
+        link_el = article.query_selector('a[href*="/status/"]')
+        tweet_id = None
+        if link_el:
+            href = link_el.get_attribute("href") or ""
+            parts = href.split("/status/")
+            if len(parts) > 1:
+                tweet_id = parts[1].split("/")[0].split("?")[0]
+
+        if tweet_id:
+            tweets.append({"id": tweet_id, "text": text_el.inner_text()})
+
+    return tweets
+
+
+def tweet_matches(text: str) -> bool:
+    return any(kw in text.lower() for kw in KEYWORDS)
+
+
+def send_email(tweet: dict) -> None:
+    tweet_url = f"https://x.com/{TARGET_USERNAME}/status/{tweet['id']}"
+    subject = f"[X Monitor] @{TARGET_USERNAME} がキーワードを含む投稿をしました"
+    body = f"""\
+@{TARGET_USERNAME} がキーワード({', '.join(KEYWORDS)})を含む投稿を検知しました。
+
+--- 投稿内容 ---
+{tweet['text']}
+
+--- リンク ---
+{tweet_url}
+"""
+    msg = MIMEMultipart()
+    msg["From"] = GMAIL_ADDRESS
+    msg["To"] = TO_EMAIL
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        server.sendmail(GMAIL_ADDRESS, TO_EMAIL, msg.as_string())
+
+    print(f"Email sent for tweet {tweet['id']}")
+
+
+def main() -> None:
+    print(f"Monitoring @{TARGET_USERNAME} for: {KEYWORDS}")
+    seen_ids = load_seen_ids()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="ja-JP",
+        )
+        page = context.new_page()
+
+        if X_USERNAME and X_PASSWORD:
+            login(page)
+
+        tweets = scrape_tweets(page)
+        browser.close()
+
+    if not tweets:
+        print("No tweets retrieved.")
+        return
+
+    new_ids = set()
+    matched = 0
+    for tweet in tweets:
+        tid = tweet["id"]
+        new_ids.add(tid)
+        if tid in seen_ids:
+            continue
+        if tweet_matches(tweet["text"]):
+            print(f"Match: {tweet['text'][:80]}...")
+            send_email(tweet)
+            matched += 1
+
+    print(f"Checked {len(tweets)} tweet(s), sent {matched} notification(s).")
+    save_seen_ids(seen_ids | new_ids)
+
+
+if __name__ == "__main__":
+    main()

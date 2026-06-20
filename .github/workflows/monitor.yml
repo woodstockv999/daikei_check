@@ -1,0 +1,53 @@
+name: Twitter Monitor (Playwright)
+
+on:
+  schedule:
+    # 15分ごとに実行 (UTC)
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install playwright
+
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run monitor
+        env:
+          TARGET_USERNAME: daikei_org
+          KEYWORDS: ${{ secrets.KEYWORDS }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          # ログインが必要な場合は以下のSecretsも設定してください
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          X_PASSWORD: ${{ secrets.X_PASSWORD }}
+          SEEN_IDS_FILE: .seen_tweet_ids.json
+        run: python scripts/monitor.py
+
+      - name: Save seen tweet IDs
+        run: |
+          if [ -f .seen_tweet_ids.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .seen_tweet_ids.json
+            git diff --cached --quiet || git commit -m "chore: update seen tweet IDs [skip ci]"
+            git push origin main
+          fi
