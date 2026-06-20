@@ -1,4 +1,4 @@
-name: Twitter Monitor (Nitter RSS)
+name: Twitter Monitor (twscrape)
 
 on:
   schedule:
@@ -32,7 +32,8 @@ jobs:
           KEYWORDS: ${{ secrets.KEYWORDS }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          X_PASSWORD: ${{ secrets.X_PASSWORD }}
           SEEN_IDS_FILE: .seen_tweet_ids.json
         run: python scripts/monitor.py
 

@@ -1,43 +1,36 @@
 #!/usr/bin/env python3
 """
-Twitter/X monitor via Nitter RSS (no API key, no browser required).
-Tries multiple Nitter instances in order and sends a Gmail alert when
-a new tweet from TARGET_USERNAME matches any of the KEYWORDS.
+Twitter/X monitor using twscrape (no official API key required).
+Uses X's internal web API with account credentials.
 
 Required environment variables:
   TARGET_USERNAME     - Twitter/X username to monitor (without @)
   KEYWORDS            - Comma-separated keywords to watch for
-  GMAIL_ADDRESS       - Gmail address used to send (App Password required)
+  GMAIL_ADDRESS       - Gmail address (App Password required)
   GMAIL_APP_PASSWORD  - Gmail App Password (16 chars, no spaces)
+  X_USERNAME          - Your X account username or email
+  X_PASSWORD          - Your X account password
   TO_EMAIL            - Recipient address (optional, defaults to GMAIL_ADDRESS)
 """
 
 import os
 import json
+import asyncio
 import smtplib
-import requests
-import feedparser
 from pathlib import Path
-from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import twscrape
 
 TARGET_USERNAME = os.environ["TARGET_USERNAME"]
 KEYWORDS = [k.strip().lower() for k in os.environ["KEYWORDS"].split(",") if k.strip()]
 GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
-TO_EMAIL = os.environ.get("TO_EMAIL", GMAIL_ADDRESS)
+X_USERNAME = os.environ["X_USERNAME"]
+X_PASSWORD = os.environ["X_PASSWORD"]
+TO_EMAIL = os.environ.get("TO_EMAIL") or GMAIL_ADDRESS
 
 SEEN_IDS_FILE = Path(os.environ.get("SEEN_IDS_FILE", ".seen_tweet_ids.json"))
-
-NITTER_INSTANCES = [
-    "https://nitter.privacydev.net",
-    "https://nitter.poast.org",
-    "https://nitter.kavin.rocks",
-    "https://nitter.nl",
-    "https://nitter.1d4.us",
-    "https://nitter.unixfox.eu",
-]
 
 
 def load_seen_ids() -> set[str]:
@@ -50,35 +43,35 @@ def save_seen_ids(ids: set[str]) -> None:
     SEEN_IDS_FILE.write_text(json.dumps(list(ids)[-500:]))
 
 
-def fetch_rss() -> list[dict]:
-    """Try each Nitter instance until one returns feed entries."""
-    for instance in NITTER_INSTANCES:
-        url = f"{instance}/{TARGET_USERNAME}/rss"
-        try:
-            resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-            if resp.status_code != 200:
-                print(f"{instance} → HTTP {resp.status_code}, skipping")
-                continue
+async def fetch_tweets_async() -> list[dict]:
+    api = twscrape.API()
+    await api.pool.add_account(
+        username=X_USERNAME,
+        password=X_PASSWORD,
+        email=X_USERNAME,
+        email_password=X_PASSWORD,
+    )
+    await api.pool.login_all()
 
-            feed = feedparser.parse(resp.text)
-            if not feed.entries:
-                print(f"{instance} → no entries, skipping")
-                continue
+    user = await api.user_by_login(TARGET_USERNAME)
+    if not user:
+        print(f"User @{TARGET_USERNAME} not found.")
+        return []
 
-            print(f"{instance} → {len(feed.entries)} entries found")
-            tweets = []
-            for entry in feed.entries:
-                tweet_id = entry.get("id", "").split("/status/")[-1].split("#")[0]
-                text = entry.get("title", "") or entry.get("summary", "")
-                if tweet_id and text:
-                    tweets.append({"id": tweet_id, "text": text, "url": entry.get("link", "")})
-            return tweets
+    tweets = []
+    async for tweet in api.user_tweets(user.id, limit=20):
+        tweets.append({
+            "id": str(tweet.id),
+            "text": tweet.rawContent,
+            "url": tweet.url,
+        })
 
-        except Exception as e:
-            print(f"{instance} → error: {e}, skipping")
-            continue
+    print(f"Fetched {len(tweets)} tweets from @{TARGET_USERNAME}")
+    return tweets
 
-    return []
+
+def fetch_tweets() -> list[dict]:
+    return asyncio.run(fetch_tweets_async())
 
 
 def tweet_matches(text: str) -> bool:
@@ -101,16 +94,29 @@ def send_email(subject: str, body: str) -> None:
 
 def main() -> None:
     print(f"Monitoring @{TARGET_USERNAME} for: {KEYWORDS}")
+    print(f"Sending to: {TO_EMAIL}")
     seen_ids = load_seen_ids()
 
-    tweets = fetch_rss()
+    try:
+        tweets = fetch_tweets()
+    except Exception as e:
+        print(f"Error fetching tweets: {e}")
+        send_email(
+            subject=f"[X Monitor] @{TARGET_USERNAME} のツイート取得に失敗しました",
+            body=(
+                f"ツイートの取得中にエラーが発生しました。\n\n"
+                f"エラー内容: {e}\n\n"
+                f"確認アカウント: https://x.com/{TARGET_USERNAME}\n"
+            ),
+        )
+        return
 
     if not tweets:
         send_email(
-            subject=f"[X Monitor] @{TARGET_USERNAME} のRSS取得に失敗しました",
+            subject=f"[X Monitor] @{TARGET_USERNAME} のツイート取得に失敗しました",
             body=(
-                f"本日の定期チェックでNitter RSSからツイートを取得できませんでした。\n\n"
-                f"全てのNitterサーバーが応答しませんでした。\n\n"
+                f"ツイートを取得できませんでした。\n"
+                f"アカウントが存在しないか、ログインに失敗した可能性があります。\n\n"
                 f"確認アカウント: https://x.com/{TARGET_USERNAME}\n"
             ),
         )
@@ -140,7 +146,7 @@ def main() -> None:
             subject=f"[X Monitor] @{TARGET_USERNAME} の本日の確認結果",
             body=(
                 f"本日の定期チェックを実施しました。\n\n"
-                f"キーワード「{'・'.join(KEYWORDS)}」を含む新しい投稿はありませんでした。\n\n"
+                f"キーワード「{chr(12539).join(KEYWORDS)}」を含む新しい投稿はありませんでした。\n\n"
                 f"確認アカウント: https://x.com/{TARGET_USERNAME}\n"
             ),
         )
