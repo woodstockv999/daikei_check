@@ -103,18 +103,7 @@ def tweet_matches(text: str) -> bool:
     return any(kw in text.lower() for kw in KEYWORDS)
 
 
-def send_email(tweet: dict) -> None:
-    tweet_url = f"https://x.com/{TARGET_USERNAME}/status/{tweet['id']}"
-    subject = f"[X Monitor] @{TARGET_USERNAME} がキーワードを含む投稿をしました"
-    body = f"""\
-@{TARGET_USERNAME} がキーワード({', '.join(KEYWORDS)})を含む投稿を検知しました。
-
---- 投稿内容 ---
-{tweet['text']}
-
---- リンク ---
-{tweet_url}
-"""
+def send_email(subject: str, body: str) -> None:
     msg = MIMEMultipart()
     msg["From"] = GMAIL_ADDRESS
     msg["To"] = TO_EMAIL
@@ -125,7 +114,31 @@ def send_email(tweet: dict) -> None:
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_ADDRESS, TO_EMAIL, msg.as_string())
 
-    print(f"Email sent for tweet {tweet['id']}")
+    print(f"Email sent: {subject}")
+
+
+def send_match_email(tweet: dict) -> None:
+    tweet_url = f"https://x.com/{TARGET_USERNAME}/status/{tweet['id']}"
+    send_email(
+        subject=f"[X Monitor] @{TARGET_USERNAME} がキーワードを含む投稿をしました",
+        body=(
+            f"@{TARGET_USERNAME} がキーワード({', '.join(KEYWORDS)})を含む投稿を検知しました。\n\n"
+            f"--- 投稿内容 ---\n{tweet['text']}\n\n"
+            f"--- リンク ---\n{tweet_url}\n"
+        ),
+    )
+
+
+def send_no_update_email() -> None:
+    send_email(
+        subject=f"[X Monitor] @{TARGET_USERNAME} の本日の確認結果",
+        body=(
+            f"本日の定期チェックを実施しました。\n\n"
+            f"キーワード「{', '.join(KEYWORDS)}」を含む新しい投稿はありませんでした。\n\n"
+            f"--- 確認アカウント ---\n"
+            f"https://x.com/{TARGET_USERNAME}\n"
+        ),
+    )
 
 
 def main() -> None:
@@ -152,6 +165,16 @@ def main() -> None:
 
     if not tweets:
         print("No tweets retrieved.")
+        send_email(
+            subject=f"[X Monitor] @{TARGET_USERNAME} のツイート取得に失敗しました",
+            body=(
+                f"本日の定期チェックでツイートを取得できませんでした。\n\n"
+                f"X.comのログインが必要になっている可能性があります。\n"
+                f"X_USERNAME / X_PASSWORD を Secrets に設定してください。\n\n"
+                f"--- 確認アカウント ---\n"
+                f"https://x.com/{TARGET_USERNAME}\n"
+            ),
+        )
         return
 
     new_ids = set()
@@ -163,10 +186,13 @@ def main() -> None:
             continue
         if tweet_matches(tweet["text"]):
             print(f"Match: {tweet['text'][:80]}...")
-            send_email(tweet)
+            send_match_email(tweet)
             matched += 1
 
-    print(f"Checked {len(tweets)} tweet(s), sent {matched} notification(s).")
+    if matched == 0:
+        send_no_update_email()
+
+    print(f"Checked {len(tweets)} tweet(s), sent {matched} match notification(s).")
     save_seen_ids(seen_ids | new_ids)
 
 
