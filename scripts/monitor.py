@@ -1,36 +1,34 @@
 #!/usr/bin/env python3
 """
-Twitter/X monitor using twscrape (no official API key required).
-Uses X's internal web API with account credentials.
+Twitter/X monitor using Twitter API v2 (free tier).
 
 Required environment variables:
   TARGET_USERNAME     - Twitter/X username to monitor (without @)
   KEYWORDS            - Comma-separated keywords to watch for
+  TWITTER_BEARER_TOKEN - Twitter API v2 Bearer Token
   GMAIL_ADDRESS       - Gmail address (App Password required)
   GMAIL_APP_PASSWORD  - Gmail App Password (16 chars, no spaces)
-  X_USERNAME          - Your X account username or email
-  X_PASSWORD          - Your X account password
   TO_EMAIL            - Recipient address (optional, defaults to GMAIL_ADDRESS)
 """
 
 import os
 import json
-import asyncio
 import smtplib
+import requests
 from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import twscrape
 
 TARGET_USERNAME = os.environ["TARGET_USERNAME"]
 KEYWORDS = [k.strip().lower() for k in os.environ["KEYWORDS"].split(",") if k.strip()]
+BEARER_TOKEN = os.environ["TWITTER_BEARER_TOKEN"]
 GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
-X_USERNAME = os.environ["X_USERNAME"]
-X_PASSWORD = os.environ["X_PASSWORD"]
 TO_EMAIL = os.environ.get("TO_EMAIL") or GMAIL_ADDRESS
 
 SEEN_IDS_FILE = Path(os.environ.get("SEEN_IDS_FILE", ".seen_tweet_ids.json"))
+API_BASE = "https://api.twitter.com/2"
+HEADERS = {"Authorization": f"Bearer {BEARER_TOKEN}"}
 
 
 def load_seen_ids() -> set[str]:
@@ -43,35 +41,41 @@ def save_seen_ids(ids: set[str]) -> None:
     SEEN_IDS_FILE.write_text(json.dumps(list(ids)[-500:]))
 
 
-async def fetch_tweets_async() -> list[dict]:
-    api = twscrape.API()
-    await api.pool.add_account(
-        username=X_USERNAME,
-        password=X_PASSWORD,
-        email=X_USERNAME,
-        email_password=X_PASSWORD,
+def get_user_id(username: str) -> str:
+    resp = requests.get(
+        f"{API_BASE}/users/by/username/{username}",
+        headers=HEADERS,
+        timeout=15,
     )
-    await api.pool.login_all()
+    resp.raise_for_status()
+    data = resp.json()
+    if "errors" in data:
+        raise Exception(f"User not found: {data['errors']}")
+    return data["data"]["id"]
 
-    user = await api.user_by_login(TARGET_USERNAME)
-    if not user:
-        print(f"User @{TARGET_USERNAME} not found.")
-        return []
 
+def fetch_tweets(user_id: str) -> list[dict]:
+    resp = requests.get(
+        f"{API_BASE}/users/{user_id}/tweets",
+        headers=HEADERS,
+        params={
+            "max_results": 10,
+            "tweet.fields": "created_at,text",
+            "exclude": "retweets,replies",
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
     tweets = []
-    async for tweet in api.user_tweets(user.id, limit=20):
+    for t in data.get("data", []):
         tweets.append({
-            "id": str(tweet.id),
-            "text": tweet.rawContent,
-            "url": tweet.url,
+            "id": t["id"],
+            "text": t["text"],
+            "url": f"https://x.com/{TARGET_USERNAME}/status/{t['id']}",
         })
-
     print(f"Fetched {len(tweets)} tweets from @{TARGET_USERNAME}")
     return tweets
-
-
-def fetch_tweets() -> list[dict]:
-    return asyncio.run(fetch_tweets_async())
 
 
 def tweet_matches(text: str) -> bool:
@@ -98,9 +102,11 @@ def main() -> None:
     seen_ids = load_seen_ids()
 
     try:
-        tweets = fetch_tweets()
+        user_id = get_user_id(TARGET_USERNAME)
+        print(f"User ID: {user_id}")
+        tweets = fetch_tweets(user_id)
     except Exception as e:
-        print(f"Error fetching tweets: {e}")
+        print(f"Error: {e}")
         send_email(
             subject=f"[X Monitor] @{TARGET_USERNAME} のツイート取得に失敗しました",
             body=(
@@ -113,10 +119,10 @@ def main() -> None:
 
     if not tweets:
         send_email(
-            subject=f"[X Monitor] @{TARGET_USERNAME} のツイート取得に失敗しました",
+            subject=f"[X Monitor] @{TARGET_USERNAME} の本日の確認結果",
             body=(
-                f"ツイートを取得できませんでした。\n"
-                f"アカウントが存在しないか、ログインに失敗した可能性があります。\n\n"
+                f"本日の定期チェックを実施しました。\n\n"
+                f"最近の投稿は見つかりませんでした。\n\n"
                 f"確認アカウント: https://x.com/{TARGET_USERNAME}\n"
             ),
         )
@@ -146,7 +152,7 @@ def main() -> None:
             subject=f"[X Monitor] @{TARGET_USERNAME} の本日の確認結果",
             body=(
                 f"本日の定期チェックを実施しました。\n\n"
-                f"キーワード「{chr(12539).join(KEYWORDS)}」を含む新しい投稿はありませんでした。\n\n"
+                f"キーワード「{'・'.join(KEYWORDS)}」を含む新しい投稿はありませんでした。\n\n"
                 f"確認アカウント: https://x.com/{TARGET_USERNAME}\n"
             ),
         )

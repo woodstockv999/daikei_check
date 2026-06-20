@@ -1,4 +1,4 @@
-name: Twitter Monitor (twscrape)
+name: Twitter Monitor (API v2)
 
 on:
   schedule:
@@ -30,10 +30,9 @@ jobs:
         env:
           TARGET_USERNAME: daikei_org
           KEYWORDS: ${{ secrets.KEYWORDS }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          X_USERNAME: ${{ secrets.X_USERNAME }}
-          X_PASSWORD: ${{ secrets.X_PASSWORD }}
           SEEN_IDS_FILE: .seen_tweet_ids.json
         run: python scripts/monitor.py
 
