@@ -48,23 +48,69 @@ def save_seen_ids(ids: set[str]) -> None:
     SEEN_IDS_FILE.write_text(json.dumps(list(ids)[-500:]))
 
 
+def save_screenshot(page, name: str) -> None:
+    path = f"debug_{name}.png"
+    page.screenshot(path=path, full_page=True)
+    print(f"Screenshot saved: {path}")
+
+
 def login(page) -> None:
     print("Logging in to X.com...")
-    page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded")
+    page.goto("https://x.com/i/flow/login", wait_until="networkidle", timeout=30000)
+    page.wait_for_timeout(2000)
+    save_screenshot(page, "01_login_page")
 
-    # Enter username/email
-    page.wait_for_selector('input[autocomplete="username"]', timeout=15000)
-    page.fill('input[autocomplete="username"]', X_USERNAME)
+    # Username field (X.com uses input[name="text"] or input[autocomplete="username"])
+    username_found = False
+    for sel in ['input[autocomplete="username"]', 'input[name="text"]', 'input[type="text"]']:
+        try:
+            page.wait_for_selector(sel, timeout=5000)
+            page.fill(sel, X_USERNAME)
+            username_found = True
+            print(f"Username field found: {sel}")
+            break
+        except PWTimeout:
+            continue
+
+    if not username_found:
+        save_screenshot(page, "02_username_not_found")
+        raise Exception("Username field not found on login page")
+
     page.keyboard.press("Enter")
+    page.wait_for_timeout(2000)
+    save_screenshot(page, "03_after_username")
 
-    # Enter password
-    page.wait_for_selector('input[name="password"]', timeout=10000)
-    page.fill('input[name="password"]', X_PASSWORD)
+    # X.com sometimes asks for email/phone verification ("unusual activity" check)
+    try:
+        verify = page.wait_for_selector('input[data-testid="ocfEnterTextTextInput"]', timeout=4000)
+        if verify:
+            print("Unusual activity check detected, entering username again...")
+            page.fill('input[data-testid="ocfEnterTextTextInput"]', X_USERNAME)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(2000)
+    except PWTimeout:
+        pass
+
+    # Password field
+    password_found = False
+    for sel in ['input[name="password"]', 'input[type="password"]']:
+        try:
+            page.wait_for_selector(sel, timeout=8000)
+            page.fill(sel, X_PASSWORD)
+            password_found = True
+            print(f"Password field found: {sel}")
+            break
+        except PWTimeout:
+            continue
+
+    if not password_found:
+        save_screenshot(page, "04_password_not_found")
+        raise Exception("Password field not found on login page")
+
     page.keyboard.press("Enter")
-
-    # Wait for redirect to home
-    page.wait_for_url("https://x.com/home", timeout=15000)
-    print("Login successful.")
+    page.wait_for_timeout(5000)
+    save_screenshot(page, "05_after_login")
+    print("Login completed.")
 
 
 def scrape_tweets(page) -> list[dict]:
