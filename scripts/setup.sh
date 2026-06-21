@@ -187,19 +187,50 @@ python -m playwright install chromium
 python -m playwright install-deps chromium
 deactivate
 
+# --- 既存 .env のバックアップ ---
+if [ -f "$INSTALL_DIR/.env" ]; then
+    BACKUP_FILE="$INSTALL_DIR/.env.bak.$(date +%Y%m%d_%H%M%S)"
+    cp "$INSTALL_DIR/.env" "$BACKUP_FILE"
+    chmod 600 "$BACKUP_FILE"
+    echo "既存の設定をバックアップしました: $BACKUP_FILE"
+    # 既存値を読み込んでデフォルト値として使う
+    set -a; source "$INSTALL_DIR/.env"; set +a
+    PREV_GMAIL_ADDRESS="$GMAIL_ADDRESS"
+    PREV_GMAIL_APP_PASSWORD="$GMAIL_APP_PASSWORD"
+    PREV_TO_EMAIL="$TO_EMAIL"
+    PREV_X_USERNAME="$X_USERNAME"
+    PREV_X_PASSWORD="$X_PASSWORD"
+else
+    PREV_GMAIL_ADDRESS=""
+    PREV_GMAIL_APP_PASSWORD=""
+    PREV_TO_EMAIL=""
+    PREV_X_USERNAME=""
+    PREV_X_PASSWORD=""
+fi
+
 # --- 認証情報入力 ---
 echo ""
 echo "[5/5] 設定情報を入力してください"
+echo "  (Enterで既存の値をそのまま使います)"
 echo "----------------------------------------"
-read -p "Gmailアドレス: " GMAIL_ADDRESS
-read -s -p "Gmailアプリパスワード (16文字): " GMAIL_APP_PASSWORD
+read -p "Gmailアドレス${PREV_GMAIL_ADDRESS:+ [$PREV_GMAIL_ADDRESS]}: " GMAIL_ADDRESS
+GMAIL_ADDRESS="${GMAIL_ADDRESS:-$PREV_GMAIL_ADDRESS}"
+
+read -s -p "Gmailアプリパスワード (16文字)${PREV_GMAIL_APP_PASSWORD:+ [****]}: " GMAIL_APP_PASSWORD
 echo ""
-read -p "通知先メールアドレス (Enterでスキップ→Gmailと同じ): " TO_EMAIL
+GMAIL_APP_PASSWORD="${GMAIL_APP_PASSWORD:-$PREV_GMAIL_APP_PASSWORD}"
+
+read -p "通知先メールアドレス (Enterでスキップ→Gmailと同じ)${PREV_TO_EMAIL:+ [$PREV_TO_EMAIL]}: " TO_EMAIL
+TO_EMAIL="${TO_EMAIL:-$PREV_TO_EMAIL}"
+
 echo ""
 echo "XのアカウントはX.comへのログインに使います。"
-read -p "XのユーザーID または メールアドレス: " X_USERNAME
-read -s -p "Xのパスワード: " X_PASSWORD
+read -p "XのユーザーID または メールアドレス${PREV_X_USERNAME:+ [$PREV_X_USERNAME]}: " X_USERNAME
+X_USERNAME="${X_USERNAME:-$PREV_X_USERNAME}"
+
+read -s -p "Xのパスワード${PREV_X_PASSWORD:+ [****]}: " X_PASSWORD
 echo ""
+X_PASSWORD="${X_PASSWORD:-$PREV_X_PASSWORD}"
 
 # --- .env ファイル作成 ---
 cat > "$INSTALL_DIR/.env" << ENV
