@@ -2,8 +2,8 @@ name: Twitter Monitor (API v2)
 
 on:
   schedule:
-    # 毎日9時（日本時間）= 0:00 UTC に実行
-    - cron: "0 0 * * *"
+    # 毎日20時（日本時間）= 11:00 UTC に実行
+    - cron: "0 11 * * *"
   workflow_dispatch:
 
 jobs:
