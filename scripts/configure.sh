@@ -3,7 +3,7 @@
 # setup.sh を再実行せずに .env の認証情報だけを更新します
 set -e
 
-INSTALL_DIR="/opt/daikei_monitor"
+INSTALL_DIR="$HOME/daikei_check"
 ENV_FILE="$INSTALL_DIR/.env"
 
 echo "========================================"
@@ -79,10 +79,10 @@ echo "  設定を保存しました: $ENV_FILE"
 echo "========================================"
 echo ""
 echo "動作確認:"
-echo "  bash /opt/daikei_monitor/run.sh"
+echo "  bash $INSTALL_DIR/run.sh"
 echo ""
 echo "バックアップから戻す場合:"
 if [ -n "${BACKUP_FILE:-}" ]; then
-    echo "  cp $BACKUP_FILE $ENV_FILE"
+    echo "  cp ${BACKUP_FILE} ${ENV_FILE}"
 fi
 echo ""

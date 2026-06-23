@@ -31,7 +31,8 @@ TO_EMAIL = os.environ.get("TO_EMAIL") or GMAIL_ADDRESS
 X_USERNAME = os.environ.get("X_USERNAME", "")
 X_PASSWORD = os.environ.get("X_PASSWORD", "")
 
-SEEN_IDS_FILE = Path(os.environ.get("SEEN_IDS_FILE", "/opt/daikei_monitor/.seen_tweet_ids.json"))
+_DEFAULT_SEEN_IDS = Path.home() / "daikei_check" / ".seen_tweet_ids.json"
+SEEN_IDS_FILE = Path(os.environ.get("SEEN_IDS_FILE", str(_DEFAULT_SEEN_IDS)))
 
 
 def load_seen_ids() -> set[str]:
