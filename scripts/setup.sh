@@ -95,8 +95,8 @@ RUNEOF
 
 chmod +x "$INSTALL_DIR/run.sh"
 
-# --- cron 設定 (毎日9時JST = 0:00 UTC) ---
-(crontab -l 2>/dev/null | grep -v daikei_monitor; echo "0 0 * * * ${INSTALL_DIR}/run.sh >> ${LOG_FILE} 2>&1") | crontab -
+# --- cron 設定 (毎日20時JST = 11:00 UTC) ---
+(crontab -l 2>/dev/null | grep -v daikei_monitor; echo "0 11 * * * ${INSTALL_DIR}/run.sh >> ${LOG_FILE} 2>&1") | crontab -
 
 echo ""
 echo "========================================"
@@ -109,5 +109,5 @@ echo ""
 echo "ログ確認:"
 echo "  cat ${LOG_FILE}"
 echo ""
-echo "自動実行: 毎日 午前9時(JST) に実行されます"
+echo "自動実行: 毎日 午後8時(JST) に実行されます"
 echo ""
