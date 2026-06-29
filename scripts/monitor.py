@@ -126,24 +126,15 @@ def fetch_tweets() -> list[dict]:
         )
         page = context.new_page()
         try:
+            # Always log in first — X blocks headless access without auth
+            if not do_login(context):
+                browser.close()
+                return []
+
             page.goto(f"https://x.com/{TARGET_USERNAME}", wait_until="load", timeout=30000)
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(4000)
 
-            # Login wall check
-            needs_login = (
-                "login" in page.url
-                or page.locator('input[name="text"]').count() > 0
-                or page.locator('[data-testid="loginButton"]').count() > 0
-            )
-            if needs_login:
-                print("Login required, attempting login...")
-                if not do_login(context):
-                    browser.close()
-                    return []
-                page.goto(f"https://x.com/{TARGET_USERNAME}", wait_until="load", timeout=30000)
-                page.wait_for_timeout(3000)
-
-            # Scroll once to load more tweets
+            # Scroll once to trigger lazy-loaded tweets
             page.keyboard.press("End")
             page.wait_for_timeout(2000)
 
