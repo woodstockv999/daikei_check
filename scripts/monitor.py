@@ -198,13 +198,7 @@ def main() -> None:
     tweets = fetch_tweets()
 
     if not tweets:
-        send_email(
-            subject=f"[X Monitor] @{TARGET_USERNAME} のツイート取得に失敗しました",
-            body=(
-                f"本日の定期チェックでツイートを取得できませんでした。\n\n"
-                f"確認アカウント: https://x.com/{TARGET_USERNAME}\n"
-            ),
-        )
+        print("No tweets fetched — skipping email, logging error only.")
         write_log("error", 0, 0, "ツイートの取得に失敗しました")
         return
 
@@ -230,14 +224,7 @@ def main() -> None:
             matched += 1
 
     if matched == 0:
-        send_email(
-            subject=f"[X Monitor] @{TARGET_USERNAME} の本日の確認結果",
-            body=(
-                f"本日の定期チェックを実施しました。\n\n"
-                f"キーワード「{'・'.join(KEYWORDS)}」を含む新しい投稿はありませんでした。\n\n"
-                f"確認アカウント: https://x.com/{TARGET_USERNAME}\n"
-            ),
-        )
+        print("No keyword matches — no email sent.")
         write_log("ok", len(tweets), 0, f"{len(tweets)}件チェック。キーワード一致なし。")
     else:
         write_log("match", len(tweets), matched,
