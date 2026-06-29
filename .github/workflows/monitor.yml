@@ -35,12 +35,12 @@ jobs:
           MONITOR_LOG_FILE: /home/w00dst0ck/apps/daikei_check/monitor_log.json
         run: python scripts/monitor.py
 
-      - name: Save seen tweet IDs
+      - name: Save state
         run: |
           if [ -f .seen_tweet_ids.json ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add .seen_tweet_ids.json
-            git diff --cached --quiet || git commit -m "chore: update seen tweet IDs [skip ci]"
+            git diff --cached --quiet || git commit -m "chore: update state [skip ci]"
             git push origin main
           fi
