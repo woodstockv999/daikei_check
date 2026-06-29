@@ -85,8 +85,8 @@ def do_login(context) -> bool:
         return False
     page = context.new_page()
     try:
-        page.goto("https://x.com/i/flow/login", wait_until="networkidle", timeout=45000)
-        page.wait_for_timeout(2000)
+        page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(3000)
 
         # Username step
         username_input = page.locator('input[name="text"], input[autocomplete="username"]').first
