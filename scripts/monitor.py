@@ -85,25 +85,37 @@ def do_login(context) -> bool:
         return False
     page = context.new_page()
     try:
-        page.goto("https://x.com/i/flow/login", wait_until="load", timeout=30000)
+        page.goto("https://x.com/i/flow/login", wait_until="networkidle", timeout=45000)
         page.wait_for_timeout(2000)
 
-        page.fill('input[name="text"]', X_USERNAME)
+        # Username step
+        username_input = page.locator('input[name="text"], input[autocomplete="username"]').first
+        username_input.wait_for(state="visible", timeout=20000)
+        username_input.fill(X_USERNAME)
         page.get_by_role("button", name="Next").click()
         page.wait_for_timeout(2000)
 
-        # Handle phone/email verification step if it appears
-        if page.locator('input[name="text"]').count() > 0:
-            page.fill('input[name="text"]', X_USERNAME)
+        # Unusual activity check (phone/email confirmation step)
+        extra = page.locator('input[name="text"], input[data-testid="ocfEnterTextTextInput"]')
+        if extra.count() > 0:
+            print("Extra verification step detected")
+            extra.first.fill(X_USERNAME)
             page.get_by_role("button", name="Next").click()
             page.wait_for_timeout(2000)
 
-        page.fill('input[name="password"]', X_PASSWORD)
+        # Password step
+        password_input = page.locator('input[name="password"], input[type="password"]').first
+        password_input.wait_for(state="visible", timeout=20000)
+        password_input.fill(X_PASSWORD)
         page.get_by_role("button", name="Log in").click()
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(5000)
 
-        logged_in = "home" in page.url or page.locator('[data-testid="AppTabBar_Home_Link"]').count() > 0
-        print(f"Login {'succeeded' if logged_in else 'may have failed'}")
+        logged_in = (
+            "home" in page.url
+            or page.locator('[data-testid="AppTabBar_Home_Link"]').count() > 0
+            or page.locator('[data-testid="SideNav_AccountSwitcher_Button"]').count() > 0
+        )
+        print(f"Login {'succeeded' if logged_in else 'may have failed'} — URL: {page.url}")
         return logged_in
     except Exception as e:
         print(f"Login error: {e}")
