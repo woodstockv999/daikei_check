@@ -32,6 +32,7 @@ jobs:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           SEEN_IDS_FILE: .seen_tweet_ids.json
+          MONITOR_LOG_FILE: /home/w00dst0ck/apps/daikei_check/monitor_log.json
         run: python scripts/monitor.py
 
       - name: Save seen tweet IDs
