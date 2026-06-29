@@ -96,14 +96,14 @@ def do_login(context) -> bool:
         username_input.fill(X_USERNAME)
         print("Filled username")
 
-        password_input = page.locator('input[name="password"]').first
-        password_input.wait_for(state="visible", timeout=10000)
-        password_input.click()
-        password_input.fill(X_PASSWORD)
-        print("Filled password")
+        # Tab to password field rather than clicking it (avoids click timeout)
+        page.keyboard.press("Tab")
+        page.wait_for_timeout(500)
+        page.keyboard.type(X_PASSWORD)
+        print("Filled password via Tab")
 
-        password_input.press("Enter")
-        page.wait_for_timeout(5000)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(6000)
         print(f"After login URL: {page.url}")
 
         logged_in = (
