@@ -86,36 +86,51 @@ def do_login(context) -> bool:
     page = context.new_page()
     try:
         page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(4000)
+        print(f"Login page URL: {page.url}")
+        print(f"Input count: {page.locator('input').count()}")
 
-        # Username step
-        username_input = page.locator('input[name="text"], input[autocomplete="username"]').first
-        username_input.wait_for(state="visible", timeout=20000)
+        # Username step — try multiple selectors
+        username_input = page.locator(
+            'input[name="text"], input[autocomplete="username"], input[type="text"]'
+        ).first
+        username_input.wait_for(state="visible", timeout=15000)
+        username_input.click()
         username_input.fill(X_USERNAME)
-        page.get_by_role("button", name="Next").click()
-        page.wait_for_timeout(2000)
+        print("Filled username")
 
-        # Unusual activity check (phone/email confirmation step)
-        extra = page.locator('input[name="text"], input[data-testid="ocfEnterTextTextInput"]')
-        if extra.count() > 0:
+        next_btn = page.get_by_role("button", name="Next")
+        next_btn.wait_for(state="visible", timeout=10000)
+        next_btn.click()
+        page.wait_for_timeout(3000)
+        print(f"After Next URL: {page.url}")
+
+        # Unusual activity / phone-email confirmation step
+        if page.locator('input[data-testid="ocfEnterTextTextInput"]').count() > 0:
             print("Extra verification step detected")
-            extra.first.fill(X_USERNAME)
+            page.locator('input[data-testid="ocfEnterTextTextInput"]').fill(X_USERNAME)
+            page.get_by_role("button", name="Next").click()
+            page.wait_for_timeout(2000)
+        elif page.locator('input[name="text"]').count() > 0:
+            print("Secondary text input step detected")
+            page.locator('input[name="text"]').fill(X_USERNAME)
             page.get_by_role("button", name="Next").click()
             page.wait_for_timeout(2000)
 
         # Password step
         password_input = page.locator('input[name="password"], input[type="password"]').first
-        password_input.wait_for(state="visible", timeout=20000)
+        password_input.wait_for(state="visible", timeout=15000)
         password_input.fill(X_PASSWORD)
         page.get_by_role("button", name="Log in").click()
         page.wait_for_timeout(5000)
+        print(f"After login URL: {page.url}")
 
         logged_in = (
             "home" in page.url
             or page.locator('[data-testid="AppTabBar_Home_Link"]').count() > 0
             or page.locator('[data-testid="SideNav_AccountSwitcher_Button"]').count() > 0
         )
-        print(f"Login {'succeeded' if logged_in else 'may have failed'} — URL: {page.url}")
+        print(f"Login {'succeeded' if logged_in else 'failed'}")
         return logged_in
     except Exception as e:
         print(f"Login error: {e}")
