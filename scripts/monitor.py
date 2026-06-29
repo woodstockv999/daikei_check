@@ -88,7 +88,21 @@ def do_login(context) -> bool:
         page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(4000)
         print(f"Login page URL: {page.url}")
-        print(f"Input count: {page.locator('input').count()}")
+        inputs = page.locator('input').all()
+        print(f"Input count: {len(inputs)}")
+        for i, inp in enumerate(inputs):
+            try:
+                print(f"  input[{i}] type={inp.get_attribute('name')} auto={inp.get_attribute('autocomplete')} visible={inp.is_visible()}")
+            except Exception:
+                pass
+        buttons = page.locator('button').all()
+        print(f"Button count: {len(buttons)}")
+        for btn in buttons:
+            try:
+                if btn.is_visible():
+                    print(f"  button: '{btn.inner_text().strip()[:40]}'")
+            except Exception:
+                pass
 
         # Username step — try multiple selectors
         username_input = page.locator(
