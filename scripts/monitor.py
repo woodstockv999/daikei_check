@@ -105,6 +105,13 @@ def do_login(context) -> bool:
         page.keyboard.press("Enter")
         page.wait_for_timeout(6000)
         print(f"After login URL: {page.url}")
+        print(f"Page title: {page.title()}")
+        err_els = page.locator('[data-testid="error-detail"], [role="alert"]').all()
+        for el in err_els:
+            try:
+                print(f"Error element: {el.inner_text().strip()[:100]}")
+            except Exception:
+                pass
 
         logged_in = (
             "home" in page.url
