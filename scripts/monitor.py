@@ -18,6 +18,7 @@ Required environment variables:
 import os
 import json
 import smtplib
+from datetime import datetime, timezone
 from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -33,6 +34,27 @@ X_PASSWORD = os.environ.get("X_PASSWORD", "")
 
 _DEFAULT_SEEN_IDS = Path.home() / "daikei_check" / ".seen_tweet_ids.json"
 SEEN_IDS_FILE = Path(os.environ.get("SEEN_IDS_FILE", str(_DEFAULT_SEEN_IDS)))
+
+_DEFAULT_LOG = Path.home() / "apps" / "daikei_check" / "monitor_log.json"
+MONITOR_LOG_FILE = Path(os.environ.get("MONITOR_LOG_FILE", str(_DEFAULT_LOG)))
+
+
+def write_log(status: str, checked: int, matched: int, message: str, matches: list[dict] | None = None) -> None:
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "checked": checked,
+        "matched": matched,
+        "message": message,
+    }
+    if matches:
+        entry["matches"] = matches
+    try:
+        logs = json.loads(MONITOR_LOG_FILE.read_text()) if MONITOR_LOG_FILE.exists() else []
+        logs.insert(0, entry)
+        MONITOR_LOG_FILE.write_text(json.dumps(logs[:30], ensure_ascii=False, indent=2))
+    except Exception as e:
+        print(f"Log write error: {e}")
 
 
 def load_seen_ids() -> set[str]:
@@ -177,10 +199,12 @@ def main() -> None:
                 f"確認アカウント: https://x.com/{TARGET_USERNAME}\n"
             ),
         )
+        write_log("error", 0, 0, "ツイートの取得に失敗しました")
         return
 
     new_ids = set()
     matched = 0
+    match_details = []
     for tweet in tweets:
         tid = tweet["id"]
         new_ids.add(tid)
@@ -196,6 +220,7 @@ def main() -> None:
                     f"--- リンク ---\n{tweet['url']}\n"
                 ),
             )
+            match_details.append({"text": tweet["text"][:200], "url": tweet["url"]})
             matched += 1
 
     if matched == 0:
@@ -207,6 +232,11 @@ def main() -> None:
                 f"確認アカウント: https://x.com/{TARGET_USERNAME}\n"
             ),
         )
+        write_log("ok", len(tweets), 0, f"{len(tweets)}件チェック。キーワード一致なし。")
+    else:
+        write_log("match", len(tweets), matched,
+                  f"{len(tweets)}件チェック。{matched}件のキーワード一致を検知。",
+                  match_details)
 
     print(f"Checked {len(tweets)} tweet(s), sent {matched} match notification(s).")
     save_seen_ids(seen_ids | new_ids)
