@@ -22,7 +22,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install chromium
+          python -m playwright install-deps chromium
 
       - name: Run monitor
         env:
@@ -31,6 +34,8 @@ jobs:
           TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          X_PASSWORD: ${{ secrets.X_PASSWORD }}
           SEEN_IDS_FILE: .seen_tweet_ids.json
           MONITOR_LOG_FILE: /home/w00dst0ck/apps/daikei_check/monitor_log.json
         run: python scripts/monitor.py
