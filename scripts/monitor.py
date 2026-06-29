@@ -99,9 +99,15 @@ def do_login(context) -> bool:
         username_input.fill(X_USERNAME)
         print("Filled username")
 
-        next_btn = page.get_by_role("button", name="Next")
-        next_btn.wait_for(state="visible", timeout=10000)
-        next_btn.click()
+        # "Next" button — try English/Japanese names, fall back to Enter key
+        next_btn = page.locator('button[type="submit"], [data-testid="LoginForm_Login_Button"]')
+        try:
+            page.get_by_role("button", name="Next").click(timeout=5000)
+        except Exception:
+            try:
+                page.get_by_role("button", name="次へ").click(timeout=5000)
+            except Exception:
+                page.keyboard.press("Enter")
         page.wait_for_timeout(3000)
         print(f"After Next URL: {page.url}")
 
@@ -121,7 +127,13 @@ def do_login(context) -> bool:
         password_input = page.locator('input[name="password"], input[type="password"]').first
         password_input.wait_for(state="visible", timeout=15000)
         password_input.fill(X_PASSWORD)
-        page.get_by_role("button", name="Log in").click()
+        try:
+            page.get_by_role("button", name="Log in").click(timeout=5000)
+        except Exception:
+            try:
+                page.get_by_role("button", name="ログイン").click(timeout=5000)
+            except Exception:
+                page.keyboard.press("Enter")
         page.wait_for_timeout(5000)
         print(f"After login URL: {page.url}")
 
