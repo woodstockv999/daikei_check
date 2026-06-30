@@ -12,7 +12,9 @@ Required environment variables:
   TO_EMAIL            - Recipient address (optional, defaults to GMAIL_ADDRESS)
   X_USERNAME          - X/Twitter login username or email
   X_PASSWORD          - X/Twitter login password
+  X_VERIFY            - Phone number or email for unusual-activity check (optional)
   SEEN_IDS_FILE       - Path to JSON file tracking seen tweet IDs
+  COOKIES_FILE        - Path to JSON file storing session cookies (optional)
 """
 
 import os
@@ -31,12 +33,16 @@ GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 TO_EMAIL = os.environ.get("TO_EMAIL") or GMAIL_ADDRESS
 X_USERNAME = os.environ.get("X_USERNAME", "")
 X_PASSWORD = os.environ.get("X_PASSWORD", "")
+X_VERIFY = os.environ.get("X_VERIFY", "")
 
 _DEFAULT_SEEN_IDS = Path.home() / "daikei_check" / ".seen_tweet_ids.json"
 SEEN_IDS_FILE = Path(os.environ.get("SEEN_IDS_FILE", str(_DEFAULT_SEEN_IDS)))
 
 _DEFAULT_LOG = Path.home() / "apps" / "daikei_check" / "monitor_log.json"
 MONITOR_LOG_FILE = Path(os.environ.get("MONITOR_LOG_FILE", str(_DEFAULT_LOG)))
+
+_DEFAULT_COOKIES = Path(".x_cookies.json")
+COOKIES_FILE = Path(os.environ.get("COOKIES_FILE", str(_DEFAULT_COOKIES)))
 
 
 def write_log(status: str, checked: int, matched: int, message: str, matches: list[dict] | None = None) -> None:
@@ -79,6 +85,44 @@ def send_email(subject: str, body: str) -> None:
     print(f"Email sent: {subject}")
 
 
+def save_cookies(context) -> None:
+    try:
+        cookies = context.cookies()
+        COOKIES_FILE.write_text(json.dumps(cookies, ensure_ascii=False))
+        COOKIES_FILE.chmod(0o600)
+        print(f"Cookies saved to {COOKIES_FILE}")
+    except Exception as e:
+        print(f"Cookie save error: {e}")
+
+
+def load_cookies(context) -> bool:
+    if not COOKIES_FILE.exists():
+        return False
+    try:
+        cookies = json.loads(COOKIES_FILE.read_text())
+        context.add_cookies(cookies)
+        print(f"Cookies loaded from {COOKIES_FILE}")
+        return True
+    except Exception as e:
+        print(f"Cookie load error: {e}")
+        return False
+
+
+def check_logged_in(page) -> bool:
+    try:
+        page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=20000)
+        page.wait_for_timeout(3000)
+        logged_in = (
+            "/home" in page.url
+            and page.locator('[data-testid="AppTabBar_Home_Link"]').count() > 0
+        )
+        print(f"Session check: {'valid' if logged_in else 'expired'} (url={page.url})")
+        return logged_in
+    except Exception as e:
+        print(f"Session check error: {e}")
+        return False
+
+
 def do_login(context) -> bool:
     if not X_USERNAME or not X_PASSWORD:
         print("X_USERNAME/X_PASSWORD not set, cannot log in")
@@ -86,38 +130,54 @@ def do_login(context) -> bool:
     page = context.new_page()
     try:
         page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(4000)
-        print(f"Login page URL: {page.url}")
+        page.wait_for_timeout(3000)
+        print(f"Login page: {page.url}")
 
-        # New X login page: username_or_email + password on same form (no "Next" step)
-        username_input = page.locator('input[name="username_or_email"]').first
+        # Step 1: Username (X uses autocomplete="username" since ~2023)
+        username_input = page.locator('input[autocomplete="username"]').first
         username_input.wait_for(state="visible", timeout=15000)
-        username_input.click()
         username_input.fill(X_USERNAME)
-        print("Filled username")
-
-        # Tab to password field rather than clicking it (avoids click timeout)
-        page.keyboard.press("Tab")
         page.wait_for_timeout(500)
-        page.keyboard.type(X_PASSWORD)
-        print("Filled password via Tab")
 
-        page.keyboard.press("Enter")
+        # Click "Next" / "次へ"
+        next_btn = page.locator('[data-testid="LoginForm_Login_Button"]').first
+        if next_btn.count() == 0:
+            # Fallback: any "Next"/"次へ" button in the form
+            next_btn = page.locator('button:has-text("次へ"), button:has-text("Next")').first
+        next_btn.click()
+        page.wait_for_timeout(3000)
+        print(f"After Next: {page.url}")
+
+        # Step 1.5: Unusual activity check (X may ask for phone/email)
+        unusual = page.locator('input[data-testid="ocfEnterTextTextInput"]')
+        if unusual.count() > 0:
+            print("Unusual activity check triggered")
+            if X_VERIFY:
+                unusual.fill(X_VERIFY)
+                page.locator('[data-testid="ocfEnterTextNextButton"]').click()
+                page.wait_for_timeout(2000)
+            else:
+                print("X_VERIFY not set — cannot complete unusual activity check")
+                return False
+
+        # Step 2: Password
+        password_input = page.locator('input[name="password"]').first
+        password_input.wait_for(state="visible", timeout=15000)
+        password_input.fill(X_PASSWORD)
+        page.wait_for_timeout(500)
+
+        # Click "Log in" / "ログイン"
+        login_btn = page.locator('[data-testid="LoginForm_Login_Button"]').first
+        login_btn.click()
         page.wait_for_timeout(6000)
-        print(f"After login URL: {page.url}")
-        print(f"Page title: {page.title()}")
-        err_els = page.locator('[data-testid="error-detail"], [role="alert"]').all()
-        for el in err_els:
-            try:
-                print(f"Error element: {el.inner_text().strip()[:100]}")
-            except Exception:
-                pass
+        print(f"After login: {page.url}")
 
         logged_in = (
-            "home" in page.url
+            "/home" in page.url
             or page.locator('[data-testid="AppTabBar_Home_Link"]').count() > 0
-            or page.locator('[data-testid="SideNav_AccountSwitcher_Button"]').count() > 0
         )
+        if logged_in:
+            save_cookies(context)
         print(f"Login {'succeeded' if logged_in else 'failed'}")
         return logged_in
     except Exception as e:
@@ -125,6 +185,22 @@ def do_login(context) -> bool:
         return False
     finally:
         page.close()
+
+
+def ensure_logged_in(context) -> bool:
+    """Use saved cookies if valid, otherwise do full login."""
+    cookies_loaded = load_cookies(context)
+    if cookies_loaded:
+        page = context.new_page()
+        try:
+            if check_logged_in(page):
+                return True
+            print("Saved cookies expired, re-logging in...")
+        finally:
+            page.close()
+
+    # Full login
+    return do_login(context)
 
 
 def fetch_tweets() -> list[dict]:
@@ -139,17 +215,15 @@ def fetch_tweets() -> list[dict]:
             locale="ja-JP",
             timezone_id="Asia/Tokyo",
         )
-        page = context.new_page()
         try:
-            # Always log in first — X blocks headless access without auth
-            if not do_login(context):
+            if not ensure_logged_in(context):
                 browser.close()
                 return []
 
+            page = context.new_page()
             page.goto(f"https://x.com/{TARGET_USERNAME}", wait_until="load", timeout=30000)
             page.wait_for_timeout(4000)
 
-            # Scroll once to trigger lazy-loaded tweets
             page.keyboard.press("End")
             page.wait_for_timeout(2000)
 
