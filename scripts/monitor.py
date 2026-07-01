@@ -18,6 +18,7 @@ Required environment variables:
 """
 
 import os
+import sys
 import json
 import smtplib
 from datetime import datetime, timezone
@@ -63,14 +64,16 @@ def write_log(status: str, checked: int, matched: int, message: str, matches: li
         print(f"Log write error: {e}")
 
 
-def load_seen_ids() -> set[str]:
+def load_seen_ids() -> list[str]:
     if SEEN_IDS_FILE.exists():
-        return set(json.loads(SEEN_IDS_FILE.read_text()))
-    return set()
+        return json.loads(SEEN_IDS_FILE.read_text())
+    return []
 
 
-def save_seen_ids(ids: set[str]) -> None:
-    SEEN_IDS_FILE.write_text(json.dumps(list(ids)[-500:]))
+def save_seen_ids(ids: list[str]) -> None:
+    # Keep as an order-preserving list (oldest first) so trimming to the last
+    # 500 evicts genuinely old IDs instead of an arbitrary set() ordering.
+    SEEN_IDS_FILE.write_text(json.dumps(ids[-500:]))
 
 
 def send_email(subject: str, body: str) -> None:
@@ -268,21 +271,23 @@ def fetch_tweets() -> list[dict]:
 def main() -> None:
     print(f"Monitoring @{TARGET_USERNAME} for: {KEYWORDS}")
     seen_ids = load_seen_ids()
+    seen_set = set(seen_ids)
 
     tweets = fetch_tweets()
 
     if not tweets:
         print("No tweets fetched — skipping email, logging error only.")
         write_log("error", 0, 0, "ツイートの取得に失敗しました")
-        return
+        sys.exit(1)
 
-    new_ids = set()
+    new_ids = []
     matched = 0
     match_details = []
     for tweet in tweets:
         tid = tweet["id"]
-        new_ids.add(tid)
-        if tid in seen_ids:
+        if tid not in seen_set:
+            new_ids.append(tid)
+        if tid in seen_set:
             continue
         if any(kw in tweet["text"].lower() for kw in KEYWORDS):
             print(f"Match: {tweet['text'][:80]}")
@@ -306,7 +311,7 @@ def main() -> None:
                   match_details)
 
     print(f"Checked {len(tweets)} tweet(s), sent {matched} match notification(s).")
-    save_seen_ids(seen_ids | new_ids)
+    save_seen_ids(seen_ids + new_ids)
 
 
 if __name__ == "__main__":
